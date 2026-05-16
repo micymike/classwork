@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+    <!-- Root element: courseCatalog -->
+    <xs:element name="courseCatalog">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="course" minOccurs="0" maxOccurs="unbounded">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="id"          type="xs:positiveInteger"/>
+                            <xs:element name="code"        type="xs:string"/>
+                            <xs:element name="title"       type="xs:string"/>
+                            <xs:element name="description" type="xs:string" minOccurs="0"/>
+                            <xs:element name="instructor"  type="xs:string"/>
+                            <xs:element name="capacity"    type="xs:positiveInteger"/>
+                            <xs:element name="enrolled"    type="xs:nonNegativeInteger"/>
+                            <xs:element name="schedule"    type="xs:string"/>
+                            <xs:element name="credits"     type="xs:positiveInteger"/>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+            <xs:attribute name="institution" type="xs:string" use="required"/>
+            <xs:attribute name="generated"   type="xs:dateTime" use="required"/>
+            <xs:anyAttribute namespace="http://www.w3.org/2001/XMLSchema-instance"
+                             processContents="strict"/>
+        </xs:complexType>
+    </xs:element>
+
+</xs:schema>
