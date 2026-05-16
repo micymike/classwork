@@ -16,10 +16,13 @@ CREATE TABLE IF NOT EXISTS users (
     id            INT           AUTO_INCREMENT PRIMARY KEY,
     username      VARCHAR(50)   NOT NULL UNIQUE,
     email         VARCHAR(100)  NOT NULL UNIQUE,
-    password_hash VARCHAR(255)  NOT NULL,
-    full_name     VARCHAR(100)  NOT NULL,
-    role          ENUM('student','admin') NOT NULL DEFAULT 'student',
-    created_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    password_hash   VARCHAR(255)  NOT NULL,
+    full_name       VARCHAR(100)  NOT NULL,
+    role            ENUM('student','admin') NOT NULL DEFAULT 'student',
+    current_streak  INT           NOT NULL DEFAULT 0,
+    longest_streak  INT           NOT NULL DEFAULT 0,
+    last_active_date DATE         DEFAULT NULL,
+    created_at      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
 
     INDEX idx_role  (role),
     INDEX idx_email (email)
@@ -54,6 +57,7 @@ CREATE TABLE IF NOT EXISTS registrations (
     course_id     INT       NOT NULL,
     registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status        ENUM('enrolled','dropped') NOT NULL DEFAULT 'enrolled',
+    notes         TEXT,
 
     UNIQUE KEY uk_user_course (user_id, course_id),
 

@@ -12,7 +12,7 @@ $currentUser = null;
 if (isset($_SESSION['user_id'])) {
     try {
         $stmt = Database::getConnection()->prepare(
-            'SELECT id, username, email, full_name, role FROM users WHERE id = ?'
+            'SELECT id, username, email, full_name, role, current_streak, longest_streak FROM users WHERE id = ?'
         );
         $stmt->execute([$_SESSION['user_id']]);
         $currentUser = $stmt->fetch();

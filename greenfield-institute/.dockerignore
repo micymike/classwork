@@ -1,0 +1,6 @@
+.git
+.gitignore
+screenshots/
+report.md
+*.md
+.DS_Store

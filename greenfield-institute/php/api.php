@@ -34,7 +34,7 @@ function require_auth(): array
     }
     try {
         $stmt = Database::getConnection()->prepare(
-            'SELECT id, username, email, full_name, role FROM users WHERE id = ?'
+            'SELECT id, username, email, full_name, role, current_streak, longest_streak FROM users WHERE id = ?'
         );
         $stmt->execute([$_SESSION['user_id']]);
         $user = $stmt->fetch();
@@ -55,6 +55,43 @@ function require_admin(): array
         json_response(['error' => 'Administrator privileges required'], 403);
     }
     return $user;
+}
+
+function update_streak(PDO $db, int $userId): array
+{
+    $stmt = $db->prepare(
+        'SELECT current_streak, longest_streak, last_active_date FROM users WHERE id = ?'
+    );
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+
+    $today     = date('Y-m-d');
+    $yesterday = date('Y-m-d', strtotime('-1 day'));
+
+    if ($user['last_active_date'] === null) {
+        $currentStreak = 1;
+    } elseif ($user['last_active_date'] === $today) {
+        return [
+            'current_streak' => (int)$user['current_streak'],
+            'longest_streak' => (int)$user['longest_streak'],
+        ];
+    } elseif ($user['last_active_date'] === $yesterday) {
+        $currentStreak = (int)$user['current_streak'] + 1;
+    } else {
+        $currentStreak = 1;
+    }
+
+    $longestStreak = max($currentStreak, (int)$user['longest_streak']);
+
+    $stmt = $db->prepare(
+        'UPDATE users SET current_streak = ?, longest_streak = ?, last_active_date = ? WHERE id = ?'
+    );
+    $stmt->execute([$currentStreak, $longestStreak, $today, $userId]);
+
+    return [
+        'current_streak' => $currentStreak,
+        'longest_streak' => $longestStreak,
+    ];
 }
 
 // ---------------------------------------------------------------------------
@@ -93,14 +130,18 @@ try {
             session_regenerate_id(true);
             $_SESSION['user_id'] = (int)$user['id'];
 
+            $streak = update_streak($db, (int)$user['id']);
+
             json_response([
                 'success' => true,
                 'user'    => [
-                    'id'        => $user['id'],
-                    'username'  => $user['username'],
-                    'full_name' => $user['full_name'],
-                    'email'     => $user['email'],
-                    'role'      => $user['role'],
+                    'id'             => $user['id'],
+                    'username'       => $user['username'],
+                    'full_name'      => $user['full_name'],
+                    'email'          => $user['email'],
+                    'role'           => $user['role'],
+                    'current_streak' => $streak['current_streak'],
+                    'longest_streak' => $streak['longest_streak'],
                 ],
             ]);
             break;
@@ -185,29 +226,111 @@ try {
         // ---- Courses (student) ----------------------------------------------
 
         case 'get_courses':
-            $search = trim($input['search'] ?? $_GET['search'] ?? '');
-            $sql    = 'SELECT * FROM courses WHERE status = ?';
-            $params = ['active'];
+            $search  = trim($input['search'] ?? $_GET['search'] ?? '');
+            $page    = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
+            $perPage = max(1, min(50, (int)($input['per_page'] ?? $_GET['per_page'] ?? 6)));
+            $offset  = ($page - 1) * $perPage;
+
+            $countSql = 'SELECT COUNT(*) FROM courses WHERE status = ?';
+            $dataSql  = 'SELECT * FROM courses WHERE status = ?';
+            $params   = ['active'];
 
             if ($search !== '') {
-                $sql .= ' AND (title LIKE ? OR code LIKE ? OR instructor LIKE ? OR description LIKE ?)';
-                $term   = "%{$search}%";
-                $params = array_merge($params, [$term, $term, $term, $term]);
+                $searchSql = ' AND (title LIKE ? OR code LIKE ? OR instructor LIKE ? OR description LIKE ?)';
+                $term      = "%{$search}%";
+                $countSql .= $searchSql;
+                $dataSql  .= $searchSql;
+                $params    = array_merge($params, [$term, $term, $term, $term]);
             }
 
-            $sql  .= ' ORDER BY code ASC';
-            $stmt  = $db->prepare($sql);
+            $stmt = $db->prepare($countSql);
             $stmt->execute($params);
+            $total = (int)$stmt->fetchColumn();
+            $pages = max(1, (int)ceil($total / $perPage));
 
-            json_response(['courses' => $stmt->fetchAll()]);
+            $dataSql .= ' ORDER BY code ASC LIMIT ? OFFSET ?';
+            $stmt     = $db->prepare($dataSql);
+            $stmt->execute(array_merge($params, [$perPage, $offset]));
+
+            json_response([
+                'courses' => $stmt->fetchAll(),
+                'total'   => $total,
+                'pages'   => $pages,
+                'page'    => $page,
+            ]);
+            break;
+
+        case 'get_course':
+            $user = require_auth();
+            $id = (int)($input['id'] ?? $_GET['id'] ?? 0);
+            if ($id <= 0) {
+                json_response(['error' => 'Course ID is required.'], 400);
+            }
+            $stmt = $db->prepare('SELECT * FROM courses WHERE id = ?');
+            $stmt->execute([$id]);
+            $course = $stmt->fetch();
+            if (!$course) {
+                json_response(['error' => 'Course not found.'], 404);
+            }
+
+            // Get enrollment data if enrolled
+            $regData = null;
+            $stmt = $db->prepare(
+                'SELECT id AS reg_id, notes FROM registrations WHERE user_id = ? AND course_id = ? AND status = ?'
+            );
+            $stmt->execute([$user['id'], $id, 'enrolled']);
+            $regData = $stmt->fetch();
+
+            $streak = update_streak($db, (int)$user['id']);
+            json_response([
+                'course' => $course,
+                'streak' => $streak,
+                'enrollment' => $regData,
+            ]);
+            break;
+
+        case 'get_streak':
+            $user = require_auth();
+            $streak = update_streak($db, (int)$user['id']);
+            json_response($streak);
             break;
 
         // ---- Courses (admin) ------------------------------------------------
 
         case 'get_all_courses':
             require_admin();
-            $stmt = $db->query('SELECT * FROM courses ORDER BY code ASC');
-            json_response(['courses' => $stmt->fetchAll()]);
+            $search  = trim($input['search'] ?? $_GET['search'] ?? '');
+            $page    = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
+            $perPage = max(1, min(100, (int)($input['per_page'] ?? $_GET['per_page'] ?? 8)));
+            $offset  = ($page - 1) * $perPage;
+
+            $countSql = 'SELECT COUNT(*) FROM courses';
+            $dataSql  = 'SELECT * FROM courses';
+            $params   = [];
+
+            if ($search !== '') {
+                $searchSql = ' WHERE (code LIKE ? OR title LIKE ? OR instructor LIKE ?)';
+                $term      = "%{$search}%";
+                $countSql .= $searchSql;
+                $dataSql  .= $searchSql;
+                $params    = [$term, $term, $term];
+            }
+
+            $stmt = $db->prepare($countSql);
+            $stmt->execute($params);
+            $total = (int)$stmt->fetchColumn();
+            $pages = max(1, (int)ceil($total / $perPage));
+
+            $dataSql .= ' ORDER BY code ASC LIMIT ? OFFSET ?';
+            $stmt     = $db->prepare($dataSql);
+            $stmt->execute(array_merge($params, [$perPage, $offset]));
+
+            json_response([
+                'courses' => $stmt->fetchAll(),
+                'total'   => $total,
+                'pages'   => $pages,
+                'page'    => $page,
+            ]);
             break;
 
         case 'add_course':
@@ -373,7 +496,7 @@ try {
         case 'get_my_courses':
             $user = require_auth();
             $stmt = $db->prepare(
-                'SELECT c.*, r.status AS reg_status, r.registered_at AS enrolled_date
+                'SELECT c.*, r.status AS reg_status, r.registered_at AS enrolled_date, r.notes, r.id AS reg_id
                    FROM registrations r
                    JOIN courses c ON r.course_id = c.id
                   WHERE r.user_id = ? AND r.status = ?
@@ -411,6 +534,179 @@ try {
             $stmt->execute($params);
 
             json_response(['registrations' => $stmt->fetchAll()]);
+            break;
+
+        // ---- Profile ---------------------------------------------------------
+
+        case 'update_profile':
+            $user = require_auth();
+            $userId    = (int)$user['id'];
+            $fullName  = trim($input['full_name'] ?? '');
+            $email     = trim($input['email'] ?? '');
+
+            if ($fullName === '' || $email === '') {
+                json_response(['error' => 'Name and email are required.'], 400);
+            }
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                json_response(['error' => 'Invalid email address.'], 400);
+            }
+
+            // Check email uniqueness (exclude current user)
+            $stmt = $db->prepare('SELECT id FROM users WHERE email = ? AND id != ?');
+            $stmt->execute([$email, $userId]);
+            if ($stmt->fetch()) {
+                json_response(['error' => 'Email is already in use.'], 409);
+            }
+
+            // Password change
+            $currentPw = $input['current_password'] ?? '';
+            $newPw     = $input['new_password'] ?? '';
+
+            if ($newPw !== '') {
+                if ($currentPw === '') {
+                    json_response(['error' => 'Current password is required to set a new password.'], 400);
+                }
+                if (strlen($newPw) < 8) {
+                    json_response(['error' => 'New password must be at least 8 characters.'], 400);
+                }
+
+                $stmt = $db->prepare('SELECT password_hash FROM users WHERE id = ?');
+                $stmt->execute([$userId]);
+                $row = $stmt->fetch();
+
+                if (!password_verify($currentPw, $row['password_hash'])) {
+                    json_response(['error' => 'Current password is incorrect.'], 403);
+                }
+
+                $hash = password_hash($newPw, PASSWORD_BCRYPT, ['cost' => 12]);
+                $stmt = $db->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+                $stmt->execute([$hash, $userId]);
+            }
+
+            $stmt = $db->prepare('UPDATE users SET full_name = ?, email = ? WHERE id = ?');
+            $stmt->execute([$fullName, $email, $userId]);
+
+            json_response([
+                'success' => true,
+                'message' => 'Profile updated successfully.',
+                'user'    => [
+                    'id'        => $userId,
+                    'username'  => $user['username'],
+                    'full_name' => $fullName,
+                    'email'     => $email,
+                    'role'      => $user['role'],
+                ],
+            ]);
+            break;
+
+        // ---- Admin: Student Management ---------------------------------------
+
+        case 'get_students':
+            require_admin();
+            $stmt = $db->query(
+                'SELECT u.id, u.username, u.full_name, u.email, u.created_at,
+                        (SELECT COUNT(*) FROM registrations r WHERE r.user_id = u.id AND r.status = ?) AS enrolled_count
+                   FROM users u
+                  WHERE u.role = ?
+                  ORDER BY u.full_name ASC'
+            );
+            $stmt->execute(['enrolled', 'student']);
+            json_response(['students' => $stmt->fetchAll()]);
+            break;
+
+        case 'admin_enroll_student':
+            require_admin();
+            $userId   = (int)($input['user_id'] ?? 0);
+            $courseId = (int)($input['course_id'] ?? 0);
+
+            if ($userId <= 0 || $courseId <= 0) {
+                json_response(['error' => 'User ID and Course ID are required.'], 400);
+            }
+
+            // Check course exists and has capacity
+            $stmt = $db->prepare('SELECT * FROM courses WHERE id = ?');
+            $stmt->execute([$courseId]);
+            $course = $stmt->fetch();
+            if (!$course) {
+                json_response(['error' => 'Course not found.'], 404);
+            }
+            if ((int)$course['enrolled'] >= (int)$course['capacity']) {
+                json_response(['error' => 'Course is full.'], 400);
+            }
+
+            // Check existing registration
+            $stmt = $db->prepare('SELECT id, status FROM registrations WHERE user_id = ? AND course_id = ?');
+            $stmt->execute([$userId, $courseId]);
+            $existing = $stmt->fetch();
+
+            if ($existing) {
+                if ($existing['status'] === 'enrolled') {
+                    json_response(['error' => 'Student is already enrolled.'], 400);
+                }
+                $db->prepare('UPDATE registrations SET status = ? WHERE id = ?')
+                   ->execute(['enrolled', $existing['id']]);
+            } else {
+                $db->prepare('INSERT INTO registrations (user_id, course_id, status) VALUES (?, ?, ?)')
+                   ->execute([$userId, $courseId, 'enrolled']);
+            }
+
+            $db->prepare('UPDATE courses SET enrolled = enrolled + 1 WHERE id = ?')->execute([$courseId]);
+
+            json_response(['success' => true, 'message' => 'Student enrolled successfully.']);
+            break;
+
+        case 'admin_drop_student':
+            require_admin();
+            $userId   = (int)($input['user_id'] ?? 0);
+            $courseId = (int)($input['course_id'] ?? 0);
+
+            if ($userId <= 0 || $courseId <= 0) {
+                json_response(['error' => 'User ID and Course ID are required.'], 400);
+            }
+
+            $stmt = $db->prepare(
+                'SELECT id FROM registrations WHERE user_id = ? AND course_id = ? AND status = ?'
+            );
+            $stmt->execute([$userId, $courseId, 'enrolled']);
+            $reg = $stmt->fetch();
+
+            if (!$reg) {
+                json_response(['error' => 'Student is not enrolled in this course.'], 404);
+            }
+
+            $db->prepare('UPDATE registrations SET status = ? WHERE id = ?')
+               ->execute(['dropped', $reg['id']]);
+            $db->prepare('UPDATE courses SET enrolled = GREATEST(enrolled - 1, 0) WHERE id = ?')
+               ->execute([$courseId]);
+
+            json_response(['success' => true, 'message' => 'Student dropped from course.']);
+            break;
+
+        // ---- Notes -----------------------------------------------------------
+
+        case 'save_notes':
+            $user     = require_auth();
+            $courseId = (int)($input['course_id'] ?? 0);
+            $notes    = $input['notes'] ?? '';
+
+            if ($courseId <= 0) {
+                json_response(['error' => 'Course ID is required.'], 400);
+            }
+
+            $stmt = $db->prepare(
+                'SELECT id FROM registrations WHERE user_id = ? AND course_id = ? AND status = ?'
+            );
+            $stmt->execute([$user['id'], $courseId, 'enrolled']);
+            $reg = $stmt->fetch();
+
+            if (!$reg) {
+                json_response(['error' => 'You are not enrolled in this course.'], 404);
+            }
+
+            $stmt = $db->prepare('UPDATE registrations SET notes = ? WHERE id = ?');
+            $stmt->execute([$notes, $reg['id']]);
+
+            json_response(['success' => true, 'message' => 'Notes saved.']);
             break;
 
         // ---- Default --------------------------------------------------------
