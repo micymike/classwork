@@ -3,12 +3,6 @@
 -- Database Schema & Seed Data
 -- ==============================================================
 
-CREATE DATABASE IF NOT EXISTS greenfield_institute
-    CHARACTER SET utf8mb4
-    COLLATE utf8mb4_unicode_ci;
-
-USE greenfield_institute;
-
 -- ------------------------------------------------------------
 -- Users: stores both students and administrators
 -- ------------------------------------------------------------
