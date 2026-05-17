@@ -24,16 +24,16 @@ class Database
                     PDO::ATTR_EMULATE_PREPARES   => false,
                 ];
 
-                $caPath = __DIR__ . '/ca.pem';
-                if (file_exists($caPath)) {
-                    $options[PDO::MYSQL_ATTR_SSL_CA] = $caPath;
+                $sslRequired = getenv('DB_SSL') === 'true';
+                if (!$sslRequired) {
+                    $query = parse_url((string)getenv('DATABASE_URL'), PHP_URL_QUERY);
+                    $sslRequired = $query && str_contains($query, 'ssl-mode=REQUIRED');
+                }
+
+                if ($sslRequired) {
+                    $caPath = __DIR__ . '/ca.pem';
+                    $options[PDO::MYSQL_ATTR_SSL_CA] = file_exists($caPath) ? $caPath : true;
                     $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
-                } elseif (getenv('DB_SSL') === 'true') {
-                    $customCa = getenv('DB_SSL_CA');
-                    if ($customCa && file_exists($customCa)) {
-                        $options[PDO::MYSQL_ATTR_SSL_CA] = $customCa;
-                        $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
-                    }
                 }
 
                 self::$instance = new PDO($dsn, DB_USER, DB_PASS, $options);
