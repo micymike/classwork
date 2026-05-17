@@ -487,8 +487,8 @@ try {
             $db->prepare('UPDATE registrations SET status = ? WHERE id = ?')
                ->execute(['dropped', $reg['id']]);
 
-            $db->prepare('UPDATE courses SET enrolled = GREATEST(enrolled - 1, 0) WHERE id = ?')
-               ->execute([$courseId]);
+$db->prepare('UPDATE courses SET enrolled = CASE WHEN enrolled > 0 THEN enrolled - 1 ELSE 0 END WHERE id = ?')
+   ->execute([$courseId]);
 
             json_response(['success' => true, 'message' => 'You have been unenrolled from the course.']);
             break;
@@ -676,7 +676,7 @@ try {
 
             $db->prepare('UPDATE registrations SET status = ? WHERE id = ?')
                ->execute(['dropped', $reg['id']]);
-            $db->prepare('UPDATE courses SET enrolled = GREATEST(enrolled - 1, 0) WHERE id = ?')
+            $db->prepare('UPDATE courses SET enrolled = CASE WHEN enrolled > 0 THEN enrolled - 1 ELSE 0 END WHERE id = ?')
                ->execute([$courseId]);
 
             json_response(['success' => true, 'message' => 'Student dropped from course.']);

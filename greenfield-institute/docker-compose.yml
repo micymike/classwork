@@ -6,4 +6,5 @@ services:
     ports:
       - "8080:80"
     environment:
+      DB_DRIVER: ${DB_DRIVER}
       DATABASE_URL: ${DATABASE_URL}
