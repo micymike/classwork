@@ -715,7 +715,9 @@ try {
             json_response(['error' => "Unknown action: {$action}"], 400);
     }
 } catch (PDOException $e) {
+    error_log('API PDO ERROR: ' . $e->getMessage());
     json_response(['error' => 'A database error occurred. Please try again later.'], 500);
 } catch (Exception $e) {
+    error_log('API ERROR: ' . $e->getMessage());
     json_response(['error' => 'An unexpected error occurred.'], 500);
 }

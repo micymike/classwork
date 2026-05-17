@@ -41,6 +41,7 @@ class Database
 
                 self::$instance = new PDO($dsn, DB_USER, DB_PASS, $options);
             } catch (PDOException $e) {
+                error_log('DB CONNECTION ERROR: ' . $e->getMessage());
                 http_response_code(500);
                 header('Content-Type: application/json');
                 die(json_encode([
