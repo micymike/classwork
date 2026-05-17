@@ -32,7 +32,10 @@ class Database
 
                 if ($sslRequired) {
                     $caPath = __DIR__ . '/ca.pem';
-                    $options[PDO::MYSQL_ATTR_SSL_CA] = file_exists($caPath) ? $caPath : true;
+                    if (!file_exists($caPath)) {
+                        $caPath = openssl_get_cert_locations()['default_cert_file'];
+                    }
+                    $options[PDO::MYSQL_ATTR_SSL_CA] = $caPath;
                     $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
                 }
 
